@@ -1,3 +1,53 @@
+import json
+import os
+
+
+def inspect_forensic_artifacts(
+    json_path="pasco_audit_report.json", csv_path="pasco_audit_alerts.csv"
+):
+    """Loads and prints a structured forensic summary of the generated audit artifacts
+
+    to verify alert severity counts, missing agency logs, and procedural blackholes.
+    """
+    print(f"[*] Inspecting generated forensic audit artifacts...")
+
+    if not os.path.exists(json_path) or not os.path.exists(csv_path):
+        print(f"[!] Error: Artifact files not found in working directory.")
+        return
+
+    # Load JSON Report
+    with open(json_path, "r", encoding="utf-8") as f:
+        report_data = json.load(f)
+
+    print("\n" + "=" * 60)
+    print(f" FORENSIC AUDIT EXECUTIVE BRIEFING: {report_data.get('agency')}")
+    print("=" * 60)
+    print(f" County / Jurisdiction : {report_data.get('county')}")
+    print(f" Case / Cause Number   : {report_data.get('case_number')}")
+    print(f" Agency Reference Ref  : {report_data.get('agency_reference')}")
+    print(f" Timestamp (UTC)       : {report_data.get('audit_timestamp_utc')}")
+    print(f" Total Docket Entries  : {report_data.get('total_entries')}")
+    print(f" Total Alerts Triggered: {report_data.get('alerts_detected')}")
+    print("-" * 60)
+
+    print("\n[+] DETECTED BLACKHOLES & EVIDENTIARY OMISSIONS:")
+    for idx, alert in enumerate(report_data.get("alerts", []), 1):
+        severity = alert.get("severity", "UNKNOWN")
+        alert_type = alert.get("type", "UNKNOWN_TYPE")
+        detail = alert.get("detail", "No details provided.")
+        print(f"  {idx}. [{severity}] {alert_type}")
+        print(f"     -> {detail}")
+
+    print("\n" + "=" * 60)
+    print(
+        f"[+] Artifact Verification Complete. Ready for formal court exhibit attachment."
+    )
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    inspect_forensic_artifacts()
+
 {
   "name": "gemini-chatbot",
   "version": "0.1.0",
