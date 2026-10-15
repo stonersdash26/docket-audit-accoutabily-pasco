@@ -106,6 +106,8 @@ class PascoCountyDocketBlackholeAuditor:
                 "detail": "No valid docket table located in Pasco County response HTML.",
             })
             return []
+python run_pasco_pipeline.py
+
 
         rows = docket_table.find_all("tr")[1:]
         for row in rows:
