@@ -1,1 +1,1 @@
-python run_pasco_pipeline.py
+git rm -f "Python "
