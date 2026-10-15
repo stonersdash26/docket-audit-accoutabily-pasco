@@ -1,0 +1,34 @@
+import hashlib
+import json
+
+
+def generate_artifact_hashes():
+    """Generate SHA-256 cryptographic hashes for court audit artifacts to establish integrity."""
+    artifacts = [
+        "pasco_audit_report.json",
+        "pasco_audit_alerts.csv",
+        "PASCO_COURT_EXHIBIT_REPORT.md",
+    ]
+    hash_ledger = {}
+
+    for filename in artifacts:
+        if os.path.exists(filename):
+            hasher = hashlib.sha256()
+            with open(filename, "rb") as f:
+                buf = f.read()
+                hasher.update(buf)
+            file_hash = hasher.hexdigest()
+            hash_ledger[filename] = file_hash
+            print(f"[+] SHA-256 [{filename}]: {file_hash}")
+        else:
+            print(f"[!] Artifact not found: {filename}")
+
+    with open("pasco_audit_hashes.json", "w", encoding="utf-8") as out:
+        json.dump(hash_ledger, out, indent=4)
+    print("[+] Cryptographic hash ledger written to pasco_audit_hashes.json")
+
+
+if __name__ == "__main__":
+    import os
+
+    generate_artifact_hashes()
