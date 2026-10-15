@@ -1,0 +1,33 @@
+import os
+import subprocess
+import sys
+
+
+def execute_pipeline_in_terminal():
+    """Automates the installation check, browser binary provisioning,
+
+    and execution of the Pasco County forensic audit pipeline script.
+    """
+    print("[*] Checking and installing required Python packages...")
+    subprocess.run([sys.executable, "-m", "pip", "install", "playwright", "beautifulsoup4"], check=True)
+
+    print("[*] Installing Playwright Chromium browser binaries...")
+    subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+
+    target_script = "run_pasco_pipeline.py"
+    if not os.path.exists(target_script):
+        print(f"[!] Error: `{target_script}` not found in the current working directory.")
+        return
+
+    print(f"[*] Executing forensic audit pipeline: `{target_script}`...")
+    result = subprocess.run([sys.executable, target_script], capture_output=True, text=True)
+
+    print(result.stdout)
+    if result.stderr:
+        print(f"[stderr]:\n{result.stderr}")
+
+    print("[+] Pipeline execution sequence finished.")
+
+
+if __name__ == "__main__":
+    execute_pipeline_in_terminal()
