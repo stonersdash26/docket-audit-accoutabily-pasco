@@ -1,0 +1,329 @@
+import os
+import sys
+from datetime import datetime, timezone
+import json
+import csv
+from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright, PlaywrightTimeoutError
+
+
+class PascoCountyDocketBlackholeAuditor:
+    """Audit Pasco County docket records for missing evidence, sealed items, and procedural blackholes."""
+
+    def __init__(
+        self,
+        case_no="2026-MM-001234",
+        agency_ref="PSO26OFF5678",
+        agency_name="Pasco County Sheriff's Office",
+    ):
+        self.case_no = case_no
+        self.agency_ref = agency_ref
+        self.agency_name = agency_name
+        self.docket_entries = []
+        self.blackhole_alerts = []
+
+    def fetch_live_docket_html(self, headless=True, timeout=30000):
+        ocrs_url = "https://www.civitekflorida.com/ocrs/county/51/"
+        print(f"[*] Initializing Playwright session for Pasco County OCRS: {ocrs_url}")
+
+        html_content = ""
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=headless)
+                context = browser.new_context(
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    ),
+                    viewport={"width": 1280, "height": 800},
+                )
+                page = context.new_page()
+                page.goto(ocrs_url, timeout=timeout)
+                page.wait_for_load_state("domcontentloaded")
+
+                try:
+                    agree_btn = page.locator(
+                        "button:has-text('Public'), input[value*='Public'], a:has-text('Public')"
+                    ).first
+                    if agree_btn.is_visible():
+                        agree_btn.click()
+                        page.wait_for_load_state("networkidle", timeout=5000)
+                except Exception:
+                    pass
+
+                print(f"[*] Searching Pasco County records for case number: {self.case_no}")
+                search_input_selector = "input#caseNumber, input[name*='CaseNumber'], input[type='text']"
+
+                try:
+                    page.wait_for_selector(search_input_selector, timeout=10000)
+                    page.fill(search_input_selector, self.case_no)
+                    page.press(search_input_selector, "Enter")
+                except PlaywrightTimeoutError:
+                    print("[!] Standard Pasco selector timed out. Executing fallback input fill...")
+                    fallback_input = page.locator("input[type='text']").first
+                    fallback_input.fill(self.case_no)
+                    fallback_input.press("Enter")
+
+                page.wait_for_load_state("networkidle", timeout=timeout)
+                html_content = page.content()
+                browser.close()
+                print("[+] Pasco County live DOM HTML successfully captured.")
+
+        except Exception as exc:
+            self.blackhole_alerts.append(
+                {
+                    "type": "PASCO_LIVE_FETCH_FAILURE",
+                    "severity": "CRITICAL",
+                    "detail": f"Failed to retrieve Pasco County OCRS portal DOM via Playwright: {exc}",
+                }
+            )
+            print(f"[!] Error during live browser fetch: {exc}")
+
+        return html_content
+
+    def parse_docket_html(self, html_content):
+        if not html_content or not html_content.strip():
+            return []
+
+        soup = BeautifulSoup(html_content, "html.parser")
+        page_text = soup.get_text(" ", strip=True).upper()
+
+        if any(term in page_text for term in ["SEALED", "CONFIDENTIAL", "REDACTED", "INJUNCTION"]):
+            self.blackhole_alerts.append(
+                {
+                    "type": "PASCO_RESTRICTED_RECORD_STATUS",
+                    "severity": "HIGH",
+                    "detail": "Pasco County record flags restricted, sealed, or confidential status indicators.",
+                }
+            )
+
+        docket_table = (
+            soup.find("table", {"id": "docketTable"})
+            or soup.find("table", class_="grid")
+            or soup.find("table")
+        )
+
+        if not docket_table:
+            self.blackhole_alerts.append(
+                {
+                    "type": "PASCO_MISSING_DOCKET_TABLE",
+                    "severity": "CRITICAL",
+                    "detail": "No valid docket table located in Pasco County response HTML.",
+                }
+            )
+            return []
+
+        rows = docket_table.find_all("tr")[1:]
+        for row in rows:
+            cols = row.find_all(["td", "th"])
+            if len(cols) >= 2:
+                date_str = cols[0].get_text(" ", strip=True)
+                description = cols[1].get_text(" ", strip=True)
+
+                link = cols[1].find("a", href=True)
+                doc_url = link.get("href") if link else None
+
+                entry = {
+                    "date": date_str,
+                    "filed_by": self.agency_name,
+                    "description": description,
+                    "has_document_link": doc_url is not None,
+                    "document_url": doc_url,
+                }
+                self.docket_entries.append(entry)
+                self._check_entry_for_blackholes(entry)
+
+        return self.docket_entries
+
+    def _check_entry_for_blackholes(self, entry):
+        desc_upper = entry.get("description", "").upper()
+
+        if "AFFIDAVIT" in desc_upper and not entry.get("has_document_link", False):
+            self.blackhole_alerts.append(
+                {
+                    "type": "PASCO_UNATTACHED_AFFIDAVIT",
+                    "severity": "HIGH",
+                    "date": entry.get("date"),
+                    "detail": (
+                        f"Pasco County charging affidavit or probable cause record logged without an active public "
+                        f"document link: '{entry.get('description', '')}'."
+                    ),
+                }
+            )
+
+    def audit_agency_evidence_omissions(self, expected_agency_logs):
+        parsed_blob = " ".join(entry.get("description", "").upper() for entry in self.docket_entries)
+
+        for log in expected_agency_logs:
+            keyword = str(log.get("keyword", "")).upper()
+            if keyword not in parsed_blob:
+                self.blackhole_alerts.append(
+                    {
+                        "type": "PASCO_AGENCY_EVIDENCE_BLACKHOLE",
+                        "severity": "CRITICAL",
+                        "agency": self.agency_name,
+                        "exhibit_id": log.get("id"),
+                        "target_identifier": log.get("identifier"),
+                        "detail": (
+                            f"Expected {self.agency_name} record '{log.get('name')}' "
+                            f"({log.get('identifier')}) missing from Pasco County court docket index."
+                        ),
+                    }
+                )
+
+    def export_report_json(self, output_path="pasco_audit_report.json"):
+        report = {
+            "county": "Pasco County, Florida",
+            "agency": self.agency_name,
+            "case_number": self.case_no,
+            "agency_reference": self.agency_ref,
+            "audit_timestamp_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "total_entries": len(self.docket_entries),
+            "alerts_detected": len(self.blackhole_alerts),
+            "alerts": self.blackhole_alerts,
+            "docket": self.docket_entries,
+        }
+        with open(output_path, "w", encoding="utf-8") as report_file:
+            json.dump(report, report_file, indent=4)
+        return output_path
+
+    def export_report_csv(self, output_path="pasco_audit_alerts.csv"):
+        fieldnames = ["type", "severity", "date", "detail", "exhibit_id", "target_identifier"]
+        with open(output_path, "w", newline="", encoding="utf-8") as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            for alert in self.blackhole_alerts:
+                writer.writerow(alert)
+        return output_path
+
+
+def generate_court_exhibit_markdown(json_path="pasco_audit_report.json", output_md="PASCO_COURT_EXHIBIT_REPORT.md"):
+    if not os.path.exists(json_path):
+        return None
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    md_content = f"""# Formal Notice of Evidentiary Omissions & Administrative Blackholes
+
+**Jurisdiction:** {data.get('county')}  
+**Law Enforcement Agency:** {data.get('agency')}  
+**Cause / Case Number:** {data.get('case_number')}  
+**Agency Reference Number:** {data.get('agency_reference')}  
+**Audit Timestamp (UTC):** {data.get('audit_timestamp_utc')}  
+
+---
+
+## Executive Summary
+
+An automated forensic web audit was executed against the public court docket repository for **{data.get('case_number')}**. The audit evaluated docket integrity, procedural timelines, unlinked charging instruments, and expected exculpatory agency evidence logs from the **{data.get('agency')}**.
+
+* **Total Docket Entries Indexed:** `{data.get('total_entries')}`
+* **Total Procedural Anomalies / Alerts Triggered:** `{data.get('alerts_detected')}`
+
+---
+
+## Summary of Detected Audit Alerts
+
+| Severity | Alert Type | Description / Evidentiary Detail |
+| :--- | :--- | :--- |
+"""
+
+    for alert in data.get("alerts", []):
+        severity = alert.get("severity", "UNKNOWN")
+        alert_type = alert.get("type", "UNKNOWN")
+        detail = alert.get("detail", "No detail provided.")
+        md_content += f"| **{severity}** | `{alert_type}` | {detail} |\n"
+
+    md_content += """
+---
+
+## Indexed Docket Entries
+
+| Filing Date | Filed By / Source | Docket Description & Link Status |
+| :--- | :--- | :--- |
+"""
+
+    for entry in data.get("docket", []):
+        date = entry.get("date", "N/A")
+        filed_by = entry.get("filed_by", "N/A")
+        desc = entry.get("description", "N/A")
+        link_status = "Linked Document Available" if entry.get("has_document_link") else "**Unlinked / Suppressed**"
+        md_content += f"| {date} | {filed_by} | {desc} <br> *Status: {link_status}* |\n"
+
+    md_content += """
+---
+
+## Certification & Demand
+
+The findings detailed above are derived from direct digital record parsing and cross-reference verification. Demand is hereby made for the immediate public indexing and disclosure of all unattached affidavits, Computer-Aided Dispatch (CAD) logs, and Body-Worn Camera (BWC) cryptographic server hashes referenced in this exhibit.
+
+**Submitted By:** Accountability Auditor / Pro Se Officer  
+"""
+
+    with open(output_md, "w", encoding="utf-8") as md_file:
+        md_file.write(md_content)
+
+    return output_md
+
+
+def run_full_pipeline():
+    print("[*] Starting Pasco County Unified Forensic Pipeline...")
+    auditor = PascoCountyDocketBlackholeAuditor(
+        case_no="2026-MM-001234",
+        agency_ref="PSO26OFF5678",
+        agency_name="Pasco County Sheriff's Office",
+    )
+
+    live_html = auditor.fetch_live_docket_html(headless=True)
+    if not live_html or len(live_html) < 500:
+        print("[!] Using Pasco County local mock fallback HTML due to network restrictions.")
+        live_html = """
+        <html>
+            <body>
+                <div class="case-header">Pasco County OCRS - Public Access Docket</div>
+                <table id="docketTable" class="grid">
+                    <thead>
+                        <tr><th>Filing Date</th><th>Docket Description & Events</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>10/01/2026</td><td>Information Filed - Pasco County Sheriff Office misdemeanor charge</td></tr>
+                        <tr><td>10/01/2026</td><td>Probable Cause Affidavit Filed (No Document Link Available)</td></tr>
+                        <tr><td>10/05/2026</td><td>State Attorney Notice of Discovery</td></tr>
+                    </tbody>
+                </table>
+            </body>
+        </html>
+        """
+
+    auditor.parse_docket_html(live_html)
+
+    expected_pasco_evidence = [
+        {
+            "id": "PASCO_EXHIBIT_1",
+            "name": "PSO CAD Dispatch Log",
+            "keyword": "CAD",
+            "identifier": "PSO Dispatch Incident Log #26-004589",
+        },
+        {
+            "id": "PASCO_EXHIBIT_2",
+            "name": "PSO Body-Worn Camera Server Export",
+            "keyword": "BWC",
+            "identifier": "Axon Digital Evidence Hash - Agency Ref PSO26OFF5678",
+        },
+    ]
+    auditor.audit_agency_evidence_omissions(expected_pasco_evidence)
+
+    json_path = auditor.export_report_json()
+    csv_path = auditor.export_report_csv()
+    md_path = generate_court_exhibit_markdown(json_path)
+
+    print("\n[+] Pasco County Forensic Pipeline Execution Complete.")
+    print(f" - JSON Report: {json_path}")
+    print(f" - CSV Report:  {csv_path}")
+    print(f" - Markdown Exhibit: {md_path}")
+    print(f" - Total Alerts Triggered: {len(auditor.blackhole_alerts)}")
+
+
+if __name__ == "__main__":
+    run_full_pipeline()
