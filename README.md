@@ -1,3 +1,28 @@
+import sqlite3
+
+def generate_accountability_summary(db_name="federal_oversight.db"):
+    conn = sqlite3.connect(db_name)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT r.title, r.url, f.category, f.snippet 
+        FROM reports r 
+        JOIN findings f ON r.id = f.report_id
+    ''')
+    
+    rows = cursor.fetchall()
+    print(f"Total Oversight Findings Logged: {len(rows)}\n")
+    for row in rows:
+        title, url, category, snippet = row
+        print(f"[{category}] {title}")
+        print(f"Source: {url}")
+        print(f"Snippet: {snippet[:120]}...\n")
+        
+    conn.close()
+
+if __name__ == "__main__":
+    generate_accountability_summary()
+
 {
   "pasco_audit_report.json": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "pasco_audit_alerts.csv": "8f42d271f8223611c876878345759146f414e21686c12140e6113b8658421162",
