@@ -2,5 +2,6 @@ Run git checkout -b feature/master-blackhole-auditor to create your featuregit a
 git commit -m "chore: update SHA-256 cryptographic verification ledger for Pasco County audit artifacts"
 git branch -vv
 git log -n 1 --oneline
+git status
 
 
