@@ -1,1 +1,2 @@
-Run git checkout -b feature/master-blackhole-auditor to create your feature
+Run git checkout -b feature/master-blackhole-auditor to create your featuregit add pasco_audit_hashes.json
+git commit -m "chore: update SHA-256 cryptographic verification ledger for Pasco County audit artifacts"
