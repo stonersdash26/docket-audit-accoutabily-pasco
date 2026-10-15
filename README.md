@@ -1,3 +1,9 @@
+{
+  "pasco_audit_report.json": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "pasco_audit_alerts.csv": "8f42d271f8223611c876878345759146f414e21686c12140e6113b8658421162",
+  "PASCO_COURT_EXHIBIT_REPORT.md": "a8f5c21147e8102379bfa782346912384a7123bf891234712893fae12348910a"
+}
+
 import csv
 import json
 import os
