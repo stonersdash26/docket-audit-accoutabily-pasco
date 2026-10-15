@@ -1,0 +1,5 @@
+auditor = PascoCountyDocketBlackholeAuditor(
+    case_no="2026-MM-001234",
+    agency_ref="PSO26OFF5678",
+    agency_name="Pasco County Sheriff's Office"
+)
