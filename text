@@ -3,4 +3,6 @@ f4e5d6c chore: organize verified audit artifacts into formal legal filing direct
 3c2d1b4a7f8e9d6c5b2a1f4e7d8c9b6a3f2e1d4c7b5a8f6e9c2d1b4a7f3e5d8c  legal_filings/case_2026_mm_001234/pasco_audit_alerts.csv
 9f8e7d6c5b4a3f2e1d4c7b6a5f8e9d2c1a4b7c6f5e2d3a8b4c1f7e9d2c5a8b3f  legal_filings/case_2026_mm_001234/PASCO_COURT_EXHIBIT_REPORT.md
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  legal_filings/case_2026_mm_001234/pasco_audit_hashes.json
+8a9b0c1 fix: sync populated pasco_audit_hashes.json into master ledger and legal filing package
+
 
