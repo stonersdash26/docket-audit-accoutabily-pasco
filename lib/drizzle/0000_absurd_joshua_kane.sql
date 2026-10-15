@@ -30,3 +30,4 @@ DO $$ BEGIN
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
+python pasco_audit_report.py
