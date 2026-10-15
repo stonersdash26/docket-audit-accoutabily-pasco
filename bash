@@ -8,5 +8,8 @@ git commit -m "chore: organize verified audit artifacts into formal legal filing
 git push origin main
 git log -n 1 --oneline
 sha256sum legal_filings/case_2026_mm_001234/*
+git add pasco_audit_hashes.json legal_filings/case_2026_mm_001234/pasco_audit_hashes.json
+git commit -m "fix: sync populated pasco_audit_hashes.json into master ledger and legal filing package"
+git push origin main
 
 
