@@ -1,1 +1,1 @@
-cat pasco_audit_hashes.json
+python plug_in_audit.py
