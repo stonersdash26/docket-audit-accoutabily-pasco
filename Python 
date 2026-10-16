@@ -1,332 +1,76 @@
-import csv
+import hashlib
 import json
-import os
-from datetime import datetime, timezone
+import time
+from typing import Dict, List, Tuple
 
-from bs4 import BeautifulSoup
-from playwright.sync_api import PlaywrightTimeoutError, sync_playwright
-
-
-class OdysseyCyberpunkBlackholeAuditor:
-    """Galactic federalic legalistic cyberpunk docket forensic auditor for jurisdictional blackhole detection."""
-
-    def __init__(
-        self,
-        case_no="2026-CYBER-9999",
-        agency_ref="GALACTIC-PSO-01",
-        agency_name="Pasco County Federalic Circuit / Sheriff Division",
-    ):
-        self.case_no = case_no
-        self.agency_ref = agency_ref
-        self.agency_name = agency_name
-        self.docket_entries = []
-        self.blackhole_alerts = []
-
-    def fetch_live_docket_html(self, headless=True, timeout=30000):
-        jurisdiction_url = "https://www.civitekflorida.com/ocrs/county/51/"
-        print(f"[*] Initializing Odyssey Cyberpunk Node connection to: {jurisdiction_url}")
-
-        html_content = ""
-        try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=headless)
-                context = browser.new_context(
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 CyberpunkAuditor/1.0"
-                    ),
-                    viewport={"width": 1280, "height": 800},
-                )
-                page = context.new_page()
-                page.goto(jurisdiction_url, timeout=timeout)
-                page.wait_for_load_state("domcontentloaded")
-
-                try:
-                    agree_btn = page.locator(
-                        "button:has-text('Public'), input[value*='Public'], a:has-text('Public')"
-                    ).first
-                    if agree_btn.is_visible():
-                        agree_btn.click()
-                        page.wait_for_load_state("networkidle", timeout=5000)
-                except Exception:
-                    pass
-
-                print(f"[*] Querying ledger database for case identifier: {self.case_no}")
-                search_input_selector = "input#caseNumber, input[name*='CaseNumber'], input[type='text']"
-
-                try:
-                    page.wait_for_selector(search_input_selector, timeout=10000)
-                    page.fill(search_input_selector, self.case_no)
-                    page.press(search_input_selector, "Enter")
-                except PlaywrightTimeoutError:
-                    print("[!] Primary input selector bypassed. Engaging neural fallback input protocol...")
-                    fallback_input = page.locator("input[type='text']").first
-                    fallback_input.fill(self.case_no)
-                    fallback_input.press("Enter")
-
-                page.wait_for_load_state("networkidle", timeout=timeout)
-                html_content = page.content()
-                browser.close()
-                print("[+] Odyssey grid node DOM successfully captured.")
-
-        except Exception as exc:
-            self.blackhole_alerts.append(
-                {
-                    "type": "CYBER_GRID_FETCH_FAILURE",
-                    "severity": "CRITICAL",
-                    "detail": f"Failed to retrieve Odyssey court ledger node DOM: {exc}",
-                }
-            )
-            print(f"[!] Critical grid fetch exception: {exc}")
-
-        return html_content
-
-    def parse_docket_html(self, html_content):
-        if not html_content or not html_content.strip():
-            return []
-
-        soup = BeautifulSoup(html_content, "html.parser")
-        page_text = soup.get_text(" ", strip=True).upper()
-
-        if any(term in page_text for term in ["SEALED", "CONFIDENTIAL", "REDACTED", "INJUNCTION"]):
-            self.blackhole_alerts.append(
-                {
-                    "type": "BLACKHOLE_RESTRICTED_RECORD",
-                    "severity": "HIGH",
-                    "detail": "Jurisdictional record flags restricted, sealed, or confidential administrative blackhole status.",
-                }
-            )
-
-        docket_table = (
-            soup.find("table", {"id": "docketTable"})
-            or soup.find("table", class_="grid")
-            or soup.find("table")
-        )
-
-        if not docket_table:
-            self.blackhole_alerts.append(
-                {
-                    "type": "BLACKHOLE_MISSING_TABLE",
-                    "severity": "CRITICAL",
-                    "detail": "No valid docket matrix located within the targeted jurisdictional response node.",
-                }
-            )
-            return []
-
-        rows = docket_table.find_all("tr")[1:]
-        for row in rows:
-            cols = row.find_all(["td", "th"])
-            if len(cols) >= 2:
-                date_str = cols[0].get_text(" ", strip=True)
-                description = cols[1].get_text(" ", strip=True)
-
-                link = cols[1].find("a", href=True)
-                doc_url = link.get("href") if link else None
-
-                entry = {
-                    "date": date_str,
-                    "filed_by": self.agency_name,
-                    "description": description,
-                    "has_document_link": doc_url is not None,
-                    "document_url": doc_url,
-                }
-                self.docket_entries.append(entry)
-                self._check_entry_for_blackholes(entry)
-
-        return self.docket_entries
-
-    def _check_entry_for_blackholes(self, entry):
-        desc_upper = entry.get("description", "").upper()
-
-        if "AFFIDAVIT" in desc_upper and not entry.get("has_document_link", False):
-            self.blackhole_alerts.append(
-                {
-                    "type": "BLACKHOLE_UNLINKED_AFFIDAVIT",
-                    "severity": "HIGH",
-                    "date": entry.get("date"),
-                    "detail": (
-                        f"Charging instrument or probable cause affidavit logged in public matrix without "
-                        f"active document node link: '{entry.get('description', '')}'."
-                    ),
-                }
-            )
-
-    def audit_agency_evidence_omissions(self, expected_agency_logs):
-        parsed_blob = " ".join(entry.get("description", "").upper() for entry in self.docket_entries)
-
-        for log in expected_agency_logs:
-            keyword = str(log.get("keyword", "")).upper()
-            if keyword not in parsed_blob:
-                self.blackhole_alerts.append(
-                    {
-                        "type": "BLACKHOLE_EVIDENCE_OMISSION",
-                        "severity": "CRITICAL",
-                        "agency": self.agency_name,
-                        "exhibit_id": log.get("id"),
-                        "target_identifier": log.get("identifier"),
-                        "detail": (
-                            f"Expected federalic accountability record '{log.get('name')}' "
-                            f"({log.get('identifier')}) purged from Odyssey ledger index."
-                        ),
-                    }
-                )
-
-    def export_report_json(self, output_path="odyssey_cyber_audit_report.json"):
-        report = {
-            "jurisdiction": "Galactic Federalic Legalistic Cyberpunk Jurisdiction (Pasco Node)",
-            "agency": self.agency_name,
-            "case_number": self.case_no,
-            "agency_reference": self.agency_ref,
-            "audit_timestamp_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "total_entries": len(self.docket_entries),
-            "alerts_detected": len(self.blackhole_alerts),
-            "alerts": self.blackhole_alerts,
-            "docket": self.docket_entries,
+class AdvancedSullivanCountyAuditorCircuit:
+    """
+    Enhanced Sullivan County Auditor Circuit (County #77) featuring
+    Council Appropriation Pre-Checks and Zero-Advance Enforcement.
+    """
+    def __init__(self):
+        self.county_number = 77
+        self.jurisdiction = "Sullivan County, Indiana"
+        self.physical_enclave = "Courthouse Room 202, 27 S. Main St., Sullivan, IN"
+        
+        self.sboa_uniform_compliance = {
+            "use_prescribed_forms_only": True,        # IC 5-11-1-21
+            "require_gateway_annual_report": True,   # State Gateway Sync
+            "coso_internal_controls_passed": True,   # IC 5-11-1-27
+            "zero_advance_disbursements": True      # Public funds ledger rule
         }
-        with open(output_path, "w", encoding="utf-8") as report_file:
-            json.dump(report, report_file, indent=4)
-        return output_path
+        
+        self.municipal_fund_ledgers: Dict[str, float] = {}
+        self.council_appropriations: Dict[str, float] = {}
+        self.gateway_state_history: List[Dict] = []
 
-    def export_report_csv(self, output_path="odyssey_cyber_audit_alerts.csv"):
-        fieldnames = ["type", "severity", "date", "detail", "exhibit_id", "target_identifier"]
-        with open(output_path, "w", newline="", encoding="utf-8") as csv_file:
-            writer = csv.DictWriter(csv_file, fieldnames=fieldnames, extrasaction="ignore")
-            writer.writeheader()
-            for alert in self.blackhole_alerts:
-                writer.writerow(alert)
-        return output_path
+    def allocate_municipal_grant_fund(self, fund_id: str, balance_credits: float, authorized_appropriation: float):
+        """Initializes fund and sets explicit Sullivan County Council appropriation limits."""
+        self.municipal_fund_ledgers[fund_id] = balance_credits
+        self.council_appropriations[fund_id] = authorized_appropriation
+        print(f"[FUND INITIALIZED] Slot '{fund_id}' | Balance: {balance_credits:,.2f} CR | Council Approp: {authorized_appropriation:,.2f} CR")
 
-
-def generate_cyber_exhibit_markdown(
-    json_path="odyssey_cyber_audit_report.json", output_md="ODYSSEY_CYBER_COURT_EXHIBIT.md"
-):
-    if not os.path.exists(json_path):
-        return None
-
-    with open(json_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    md_content = f"""# GALACTIC FEDERALIC LEGALISTIC CYBERPUNK JURISDICTION
-## Notice of Evidentiary Omissions & Administrative Blackhole Audit
-
-**Jurisdiction:** {data.get('jurisdiction')}  
-**Accountability Agency:** {data.get('agency')}  
-**Case / Cause Number:** {data.get('case_number')}  
-**Agency Reference ID:** {data.get('agency_reference')}  
-**Audit Timestamp (UTC):** {data.get('audit_timestamp_utc')}  
-
----
-
-## Executive Summary
-
-An automated BeautifulSoup and Playwright forensic web scan was executed against the public Odyssey court docket repository for **{data.get('case_number')}**. This audit evaluates procedural fidelity, unlinked charging instruments, administrative blackholes, and missing exculpatory evidence logs across the decentralized legal grid.
-
-* **Total Docket Entries Indexed:** `{data.get('total_entries')}`
-* **Total Procedural Blackhole Anomalies Triggered:** `{data.get('alerts_detected')}`
-
----
-
-## Detected Blackhole Alerts & Anomalies
-
-| Severity | Alert Type | Evidentiary Detail & Description |
-| :--- | :--- | :--- |
-"""
-
-    for alert in data.get("alerts", []):
-        severity = alert.get("severity", "UNKNOWN")
-        alert_type = alert.get("type", "UNKNOWN")
-        detail = alert.get("detail", "No detail provided.")
-        md_content += f"| **{severity}** | `{alert_type}` | {detail} |\n"
-
-    md_content += """
----
-
-## Indexed Docket Matrix Entries
-
-| Filing Date | Source Authority | Docket Description & Link Status |
-| :--- | :--- | :--- |
-"""
-
-    for entry in data.get("docket", []):
-        date = entry.get("date", "N/A")
-        filed_by = entry.get("filed_by", "N/A")
-        desc = entry.get("description", "N/A")
-        link_status = "Linked Document Available" if entry.get("has_document_link") else "**Unlinked / Blackhole Suppressed**"
-        md_content += f"| {date} | {filed_by} | {desc} <br> *Status: {link_status}* |\n"
-
-    md_content += """
----
-
-## Certification & Sovereign Demand
-
-The findings detailed above are derived from direct digital record parsing and cross-reference verification within the Odyssey system node. Formal demand is hereby executed for the immediate public indexing, disclosure, and cryptographic verification of all unattached charging affidavits, Computer-Aided Dispatch (CAD) logs, and Body-Worn Camera (BWC) server hashes referenced in this exhibit.
-
-**Submitted By:** Accountability Auditor / Cyberpunk Pro Se Officer  
-"""
-
-    with open(output_md, "w", encoding="utf-8") as md_file:
-        md_file.write(md_content)
-
-    return output_md
-
-
-def run_full_pipeline():
-    print("[*] Initializing Galactic Federalic Cyberpunk Forensic Pipeline...")
-    auditor = OdysseyCyberpunkBlackholeAuditor(
-        case_no="2026-CYBER-9999",
-        agency_ref="GALACTIC-PSO-01",
-        agency_name="Pasco County Federalic Circuit / Sheriff Division",
-    )
-
-    live_html = auditor.fetch_live_docket_html(headless=True)
-    if not live_html or len(live_html) < 500:
-        print("[!] Network restricted. Engaging local Odyssey cyberpunk mock node fallback HTML...")
-        live_html = """
-        <html>
-            <body>
-                <div class="case-header">Odyssey Court Ledger - Public Access Node</div>
-                <table id="docketTable" class="grid">
-                    <thead>
-                        <tr><th>Filing Date</th><th>Docket Description & Events</th></tr>
-                    </thead>
-                    <tbody>
-                        <tr><td>10/14/2026</td><td>Information Filed - Misdemeanor Cyber-Jurisdiction Charge</td></tr>
-                        <tr><td>10/14/2026</td><td>Probable Cause Affidavit Filed (No Document Link Available)</td></tr>
-                        <tr><td>10/14/2026</td><td>Notice of Discovery - State Attorney Prosecution Node</td></tr>
-                    </tbody>
-                </table>
-            </body>
-        </html>
+    def process_county_claim(self, fund_id: str, claim_amount: float, claim_metadata: Dict) -> Tuple[bool, str]:
         """
+        Audits an incoming expense warrant against SBOA compliance predicates,
+        council appropriation caps, and zero-advance rules.
+        """
+        print(f"\n[AUDITING CLAIM] Processing warrant for '{fund_id}'... Amt: {claim_amount:,.2f} CR")
+        
+        # 1. Prescribed Form Check (IC 5-11-1-21)
+        if not claim_metadata.get("has_sboa_prescribed_form_validation", False):
+            return False, "REJECTED_BY_SBOA_FORM_INFRACTION (IC 5-11-1-21 Violation)"
+            
+        # 2. Internal Controls Check (IC 5-11-1-27)
+        if not self.sboa_uniform_compliance["coso_internal_controls_passed"]:
+            return False, "REJECTED_INTERNAL_CONTROL_FAILURE (IC 5-11-1-27 Fault)"
 
-    auditor.parse_docket_html(live_html)
+        # 3. Zero-Advance Disbursement Rule (Public Funds Ledger)
+        if self.sboa_uniform_compliance["zero_advance_disbursements"] and claim_metadata.get("is_advance_payment", False):
+            return False, "REJECTED_ZERO_ADVANCE_VIOLATION (Goods/services must be received prior to disbursement)"
 
-    expected_cyber_evidence = [
-        {
-            "id": "CYBER_EXHIBIT_1",
-            "name": "CAD Dispatch Ledger",
-            "keyword": "CAD",
-            "identifier": "Galactic Dispatch Incident Log #CYBER-26-8891",
-        },
-        {
-            "id": "CYBER_EXHIBIT_2",
-            "name": "Body-Worn Camera Server Cryptographic Hash",
-            "keyword": "BWC",
-            "identifier": "Axon SHA-256 Digital Evidence Hash - Agency Ref GALACTIC-PSO-01",
-        },
-    ]
-    auditor.audit_agency_evidence_omissions(expected_cyber_evidence)
+        # 4. Council Appropriation Cap Check
+        authorized_cap = self.council_appropriations.get(fund_id, 0.0)
+        if claim_amount > authorized_cap:
+            return False, f"REJECTED_EXCEEDS_COUNCIL_APPROPRIATION (Cap: {authorized_cap:,.2f} CR)"
 
-    json_path = auditor.export_report_json()
-    csv_path = auditor.export_report_csv()
-    md_path = generate_cyber_exhibit_markdown(json_path)
+        # 5. Liquidity Constraint Check
+        current_fund_balance = self.municipal_fund_ledgers.get(fund_id, 0.0)
+        if claim_amount > current_fund_balance:
+            return False, "REJECTED_UNFUNDED_APPROPRIATION_BYPASS"
 
-    print("\n[+] Galactic Cyberpunk Forensic Pipeline Execution Complete.")
-    print(f" - JSON Report:     {json_path}")
-    print(f" - CSV Alert List:  {csv_path}")
-    print(f" - Markdown Exhibit: {md_path}")
-    print(f" - Total Blackhole Alerts Triggered: {len(auditor.blackhole_alerts)}")
-
-
-if __name__ == "__main__":
-    run_full_pipeline()
+        # State Transition
+        self.municipal_fund_ledgers[fund_id] -= claim_amount
+        self.council_appropriations[fund_id] -= claim_amount
+        timestamp = time.time()
+        
+        sync_payload = {
+            "county": self.county_number,
+            "timestamp": timestamp,
+            "fund_id": fund_id,
+            "amount_disbursed": claim_amount,
+            "state_signature": hashlib.sha256(f"{fund_id}-{claim_amount}-{timestamp}".encode()).hexdigest()
+        }
+        self.gateway_state_history.append(sync_payload)
+        
+        return True, f"APPROVED_AND_CERTIFIED_BY_AUDITOR_77 | Block Hash: {sync_payload['state_signature'][:16]}..."
